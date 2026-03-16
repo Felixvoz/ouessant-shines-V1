@@ -1,0 +1,63 @@
+#TIMEHORIZON
+     T = 8760; //One year (in hours)
+
+#GLOBAL
+     WACC=0.07;
+     tidal_capex = 3375/(1+{k}*0.5); // €/kW
+     tidal_lifetime=22.5; // years
+     tidal_an_capex = tidal_capex*(WACC*((1+WACC)**tidal_lifetime))/((1+WACC)**tidal_lifetime-1); // €/kW/year
+     tidal_opex = 100/(1+{k}*0.5); // €/kW/year
+
+     battery_capex= 290 ; // €/kWh/year
+     battery_lifetime = 15 ; // years
+     battery_an_capex = battery_capex*(WACC*((1+WACC)**battery_lifetime))/((1+WACC)**battery_lifetime-1); // €/Kwh/year
+     battery_opex = 8.4; // €/kWh/year
+
+     realistic_factor=500;
+
+#NODE tidal
+    #PARAMETERS
+     capacity_factor = import "../../../data/pure_tidal.csv"; // normalised HKT generation profile
+    #VARIABLES
+     external: capacity; // HKT capacity, in kW
+     external: power[T]; // HKT output power, in kW
+    #CONSTRAINTS
+     capacity >=0;
+     power[t] >=0; 
+     power[t] <= capacity_factor[t] * capacity;
+    #OBJECTIVES
+     min: (global.tidal_an_capex + global.tidal_opex) * capacity; // minimise HKT annual costs
+
+#NODE battery 
+    #PARAMETERS
+     self_discharge = 0.000028; // 2% per month
+     efficiency_charge = 0.97;
+     efficiency_discharge = 0.97;
+     C_rate = 0.5; // 1/time needed for a full charge at max power
+    #VARIABLES
+     external: capacity; // batter capacity, in kWh
+     external: battery_in[T]; // energy going in the battery, in kWh
+     external: battery_out[T]; // energy going out the battery, in kWh
+     external: battery_charge[T]; // state of charge of the battery, in kWh
+    #CONSTRAINTS
+     capacity >=0;
+     battery_charge[t] >=0;
+     battery_in[t] >=0;
+     battery_out[t] >=0; 
+     battery_in[t] <= capacity * C_rate;
+     battery_out[t] <= capacity * C_rate;
+     battery_charge[t] <= capacity;
+     battery_charge[t+1] == (1-self_discharge) * battery_charge[t] 
+                            + efficiency_charge * battery_in[t]
+                            - (battery_out[t]/efficiency_discharge) ;
+     battery_charge[T-1] >= battery_charge[0];
+    #OBJECTIVES
+     min: (global.battery_an_capex+global.battery_opex) * capacity; // minimise battery annual costs
+
+
+#HYPEREDGE power_balance 
+    #PARAMETERS
+     electrical_load = import "../../../data/conso_fr_2019_normalise.csv"; // normalised demand curve
+    #CONSTRAINTS
+     tidal.power[t] + battery.battery_out[t] 
+     == global.realistic_factor * electrical_load[t] + battery.battery_in[t] ;

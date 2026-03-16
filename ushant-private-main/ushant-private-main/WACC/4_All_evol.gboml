@@ -1,0 +1,101 @@
+#TIMEHORIZON
+     T = 8760; //One year (in hours)
+
+#GLOBAL
+     WACC=0.07;
+
+     tidal_capex = 3375/(1+{k}*0.05); // €/kW
+     tidal_lifetime=22.5; // years
+     tidal_an_capex = tidal_capex*(WACC*((1+WACC)**tidal_lifetime))/((1+WACC)**tidal_lifetime-1); // €/kW/years
+     tidal_opex = 100/(1+{k}*0.05); // €/kW/year
+
+     solar_capex = 870; // €/kW
+     solar_lifetime=35; // years
+     solar_an_capex = solar_capex*(WACC*((1+WACC)**solar_lifetime))/((1+WACC)**solar_lifetime-1); // €/kW/year
+     solar_opex = 10.6; // €/kW/year
+
+     wind_offshore_capex = 2780 ; // €/kW
+     wind_offshore_lifetime = 30; // years
+     wind_offshore_an_capex = wind_offshore_capex*(WACC*((1+WACC)**wind_offshore_lifetime))/((1+WACC)**wind_offshore_lifetime-1); // €/kW/years
+     wind_offshore_opex = 44 ; // €/kW/year
+
+
+     battery_capex= 290 ; // €/kWh
+     battery_lifetime = 15 ; // years
+     battery_an_capex = battery_capex*(WACC*((1+WACC)**battery_lifetime))/((1+WACC)**battery_lifetime-1); // €/kWh/year
+     battery_opex = 8.4; // €/kWh/year
+
+     realistic_factor=500;
+
+#NODE tidal
+    #PARAMETERS
+     capacity_factor = import "../../../data/pure_tidal.csv"; // normalised HKT generation profile
+    #VARIABLES
+     external: capacity; // HKT capacity, in kW
+     external: power[T]; // HKT output power, in kW
+    #CONSTRAINTS
+     capacity >=0; 
+     power[t] >=0; 
+     power[t] <= capacity_factor[t] * capacity;
+    #OBJECTIVES
+     min: (global.tidal_capex + global.tidal_opex) * capacity; // minimise the HKT annual costs 
+
+#NODE solar_pv
+    #PARAMETERS
+     capacity_factor = import "../../../data/pure_solar_pv.csv"; // normalised solar PV generation profile 
+    #VARIABLES
+     external: capacity; // solar PV capacity, in kW
+     external: power[T]; // solar PV output power, in kW
+    #CONSTRAINTS
+     capacity >= 0;
+     power[t] >= 0;
+     power[t] <= capacity_factor[t] * capacity ;
+    #OBJECTIVES
+     min: (global.solar_capex + global.solar_opex) * capacity; // minimise solar PV annual costs
+
+#NODE wind_offshore
+    #PARAMETERS
+     capacity_factor = import "../../../data/pure_wind_offshore.csv"; // normalised wind offshore generation profile
+    #VARIABLES
+     external: capacity; // wind offshore capacity, in kW
+     external: power[T]; // wind offshore output power, in kW
+    #CONSTRAINTS
+     capacity >= 0;
+     power[t] >=0; 
+     power[t] <=capacity_factor[t] * capacity ;
+    #OBJECTIVES
+     min: (global.wind_offshore_capex + global.wind_offshore_opex) * capacity ; // mimise wind offshore annual costs 
+
+#NODE battery 
+    #PARAMETERS
+     self_discharge = 0.000028; // 2% per month
+     efficiency_charge = 0.97;
+     efficiency_discharge = 0.97;
+     C_rate = 0.5; // 1/time needed for a full charge at max power
+    #VARIABLES
+     external: capacity; // battery capacity, in kWh
+     external: battery_in[T]; // energy going in the battery, in kWh
+     external: battery_out[T]; // energy goig out of the battery, in kWh
+     external: battery_charge[T]; // state of charge of the battery, in kWh
+    #CONSTRAINTS
+     capacity >=0;
+     battery_charge[t] >=0;
+     battery_in[t] >=0;
+     battery_out[t] >=0; 
+     battery_in[t] <= capacity * C_rate;
+     battery_out[t] <= capacity * C_rate;
+     battery_charge[t] <= capacity;
+     battery_charge[t+1] == (1-self_discharge) * battery_charge[t] 
+                            + efficiency_charge * battery_in[t]
+                            - (battery_out[t]/efficiency_discharge) ;
+     battery_charge[T-1] >= battery_charge[0];
+    #OBJECTIVES
+     min: (global.battery_capex+global.battery_opex) * capacity; // minimise battery annual installation costs 
+
+
+#HYPEREDGE power_balance 
+    #PARAMETERS
+     electrical_load = import "../../../data/conso_fr_2019_normalise.csv"; // normalised demand curve
+    #CONSTRAINTS
+     tidal.power[t] + solar_pv.power[t] + wind_offshore.power[t] + battery.battery_out[t] 
+     == global.realistic_factor * electrical_load[t] + battery.battery_in[t] ;
