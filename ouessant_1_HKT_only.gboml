@@ -1,0 +1,72 @@
+#TIMEHORIZON
+     T = 8760; //One year (in hours)
+
+#GLOBAL
+
+     tidal_capex=3400; // €/kW
+     tidal_lifetime=22.5; // year
+     tidal_an_capex = tidal_capex/tidal_lifetime; // €/kW/year
+     tidal_opex = 100; // €/kW/year
+
+     battery_capex= 290 ; // €/kW
+     battery_lifetime = 15 ; //year
+     battery_an_capex = battery_capex/battery_lifetime; //€/kW/year
+     battery_opex = 8.4; // €/kWh/year
+
+     realistic_factor=334.39;
+
+#NODE tidal
+    #PARAMETERS
+     capacity_factor = import "../../data/pure_tidal.csv"; // normalised HKT generation profile
+    #VARIABLES
+     external: capacity; // capacity of HKT in kW
+     external: power[T]; // power output of tidal turbine kW 
+    #CONSTRAINTS
+     capacity >=0; 
+     power[t] >=0; 
+     power[t] <= capacity_factor[t] * capacity; // Curtailment is authorised
+    #OBJECTIVES
+     min: (global.tidal_an_capex + global.tidal_opex) * capacity; // minimise HKT annual costs
+
+#NODE battery 
+    #PARAMETERS
+     self_discharge = 0.000028; // 2% per month
+     efficiency_charge = 0.97; 
+     efficiency_discharge = 0.97;
+     C_rate = 0.5; // 1/time needed for a full charge at max power
+    #VARIABLES
+     external: capacity; // capacity of the battery, in kWh
+     external: battery_in[T]; // energy going in, in kWh
+     external: battery_out[T]; // energy going out, in kWh
+     external: battery_charge[T]; // state of charge of the battery,in kWh
+    #CONSTRAINTS
+     capacity >=0; 
+     battery_charge[t] >=0;
+     battery_in[t] >=0;
+     battery_out[t] >=0; 
+     battery_in[t] <= capacity * C_rate;
+     battery_out[t] <= capacity * C_rate;
+     battery_charge[t] <= capacity;
+     battery_charge[t+1] == (1-self_discharge) * battery_charge[t] 
+                            + efficiency_charge * battery_in[t]
+                            - (battery_out[t]/efficiency_discharge) ;
+     battery_charge[T-1] >= battery_charge[0];
+    #OBJECTIVES
+     min: (global.battery_an_capex + global.battery_opex) * capacity; // minimise battery annual costs
+
+#NODE penality // Penality if the demand is not meet can be add
+     #PARAMETERS
+      cost_no_furnish = 1000000; // in €/kWh. If the value is 1000000, it means that it is not applicable
+     #VARIABLES
+      external: amount_not_furnish[T]; // in kW
+     #CONSTRAINTS
+      amount_not_furnish[t] >=0;
+     #OBJECTIVES
+      min: amount_not_furnish[t] * cost_no_furnish ; //mimise the ammount spent by not furnishing the demand
+
+#HYPEREDGE power_balance 
+    #PARAMETERS
+     electrical_load = import "../../data/conso_fr_2019_normalise.csv"; //normalised demand curve include in [0;1].
+    #CONSTRAINTS
+     tidal.power[t] + battery.battery_out[t] + penality.amount_not_furnish[t]
+     == global.realistic_factor * electrical_load[t] + battery.battery_in[t] ;
